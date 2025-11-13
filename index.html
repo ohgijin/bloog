@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>동아리 블로그 — Realtime DB 버전(정리본)</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#141a34;--muted:#93a0cf;--text:#e8edff;--ok:#28d17c;--bad:#ff6b6b}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:ui-sans-serif,system-ui,"Noto Sans KR",sans-serif;background:#0b1020;color:var(--text)}
+    header{position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:#141a34;border-bottom:1px solid #2a346a}
+    .btn{padding:10px 14px;border:1px solid #3a4588;background:#1a2253;color:#fff;border-radius:12px;cursor:pointer}
+    .wrap{max-width:960px;margin:0 auto;padding:20px}
+    .card{background:#121739;border:1px solid #26306b;border-radius:16px;padding:18px;margin:16px 0}
+    input,textarea{width:100%;padding:12px;border-radius:12px;border:1px solid #34407d;background:#0d1330;color:#e8edff;margin:6px 0}
+    textarea{min-height:90px;resize:vertical}
+    [hidden]{display:none!important}
+    .post{padding:14px;border-radius:12px;background:#0f1535;border:1px solid #2a356e;margin:12px 0}
+    .post img{max-width:100%;border-radius:10px;border:1px solid #2b3a7b}
+    .meta{font-size:14px;color:#b9c9ff;margin-bottom:6px}
+    .hint{color:var(--muted);font-size:12px}
+    .ok{color:var(--ok)} .err{color:var(--bad)}
+  </style>
+</head>
+<body>
+  <header>
+    <div>🚀 동아리 블로그 (Realtime Database)</div>
+    <div>
+      <span id="greet" class="hint" hidden></span>
+      <button id="btnLogout" class="btn" hidden>로그아웃</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- 회원가입 -->
+    <section id="page-signup" class="card">
+      <h3>회원가입</h3>
+      <input id="su_name" type="text" placeholder="이름" required />
+      <input id="su_email" type="email" placeholder="이메일" required />
+      <input id="su_pw" type="password" placeholder="비밀번호(6자 이상)" minlength="6" required />
+      <label class="hint">프로필 이미지(선택)</label>
+      <input id="su_avatar" type="file" accept="image/*" />
+      <div id="signupMsg" class="hint"></div>
+      <button id="btnSignup" class="btn" type="button">가입하기</button>
+      <div class="hint" style="margin-top:8px">
+        이미 계정이 있나요?
+        <button id="goLogin" class="btn" type="button" style="padding:6px 10px">로그인</button>
+      </div>
+    </section>
+
+    <!-- 로그인 -->
+    <section id="page-login" class="card" hidden>
+      <h3>로그인</h3>
+      <input id="li_email" type="email" placeholder="이메일" required />
+      <input id="li_pw" type="password" placeholder="비밀번호" required />
+      <div id="loginMsg" class="hint"></div>
+      <button id="btnLogin" class="btn" type="button">로그인</button>
+    </section>
+
+    <!-- 메인 -->
+    <section id="page-main" hidden>
+      <div class="card">
+        <h3>새 글 쓰기</h3>
+        <textarea id="po_text" placeholder="무슨 일이 있었나요?"></textarea>
+        <label class="hint">사진(선택)</label>
+        <input id="po_img" type="file" accept="image/*" />
+        <button id="btnPost" class="btn" type="button">게시</button>
+        <span id="postMsg" class="hint"></span>
+      </div>
+
+      <div class="card">
+        <h3>피드</h3>
+        <div id="feed"></div>
+        <div id="empty" class="hint">아직 글이 없어요.</div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    // --- Firebase SDK (App/Auth/Realtime DB/Storage) ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+    import {
+      getAuth,
+      onAuthStateChanged,
+      createUserWithEmailAndPassword,
+      updateProfile,
+      signInWithEmailAndPassword,
+      signOut
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    import {
+      getDatabase,
+      ref,
+      push,
+      set,
+      onValue,
+      remove,
+      get
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-database.js";
+    
+    import {
+      getStorage,
+      ref as sRef,
+      uploadBytes,
+      getDownloadURL
+    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js";
+
+    // 🔑 네 프로젝트 값 (databaseURL 꼭 포함!)
+    const firebaseConfig = {
+      apiKey: "AIzaSyDH5rYNy8JmYunswXvuWiCTO7vyebCohpk",
+      authDomain: "blog-c678b.firebaseapp.com",
+      databaseURL: "https://blog-c678b-default-rtdb.firebaseio.com",
+      projectId: "blog-c678b",
+      storageBucket: "blog-c678b.appspot.com",
+      messagingSenderId: "474253780071",
+      appId: "1:474253780071:web:321d84de40ec9b384f20c2",
+      measurementId: "G-RQ3ZBT73QS"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+    const storage = getStorage(app);
+
+    // --- DOM ---
+    const $ = sel => document.querySelector(sel);
+    const pageSignup = $('#page-signup');
+    const pageLogin  = $('#page-login');
+    const pageMain   = $('#page-main');
+    const greet      = $('#greet');
+    const btnLogout  = $('#btnLogout');
+    const feed       = $('#feed');
+    const empty      = $('#empty');
+
+    const show = (el) => {
+      [pageSignup, pageLogin, pageMain].forEach(s => s.hidden = true);
+      el.hidden = false;
+    };
+    const esc = (s='') =>
+      s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    // --- Auth state (여기서 항상 이름 세팅) ---
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // DB에 저장된 이름이 있으면 그걸 우선 사용
+        let name = user.displayName || '사용자';
+        try {
+          const userSnap = await get(ref(db, `users/${user.uid}`));
+          if (userSnap.exists() && userSnap.val().name) {
+            name = userSnap.val().name;
+          }
+        } catch (e) {
+          console.warn('user profile read error:', e);
+        }
+
+        greet.hidden = false;
+        greet.textContent = `안녕하세요, ${name}님!`;
+        btnLogout.hidden = false;
+        show(pageMain);
+        attachFeed();
+      } else {
+        greet.hidden = true;
+        btnLogout.hidden = true;
+        show(pageSignup);
+        detachFeed();
+      }
+    });
+
+    // --- 회원가입 ---
+    $('#btnSignup').onclick = async () => {
+      const name  = $('#su_name').value.trim();
+      const email = $('#su_email').value.trim();
+      const pw    = $('#su_pw').value;
+      const file  = $('#su_avatar').files[0];
+      const msg   = $('#signupMsg');
+      msg.textContent = '';
+
+      if (!email || !pw) {
+        msg.innerHTML = '<span class="err">이메일과 비밀번호를 입력하세요.</span>';
+        return;
+      }
+
+      try {
+        const { user } = await createUserWithEmailAndPassword(auth, email, pw);
+
+        let photoURL = '';
+        if (file) {
+          const r = sRef(storage, `avatars/${user.uid}/${crypto.randomUUID()}`);
+          await uploadBytes(r, file);
+          photoURL = await getDownloadURL(r);
+        }
+
+        const finalName = name || '사용자';
+
+        await updateProfile(user, {
+          displayName: finalName,
+          photoURL: photoURL || null
+        });
+
+        await set(ref(db, `users/${user.uid}`), {
+          uid: user.uid,
+          name: finalName,
+          email,
+          photoURL: photoURL || '',
+          createdAt: Date.now()
+        });
+
+        // 헤더도 즉시 업데이트
+        greet.hidden = false;
+        greet.textContent = `안녕하세요, ${finalName}님!`;
+        btnLogout.hidden = false;
+        show(pageMain);
+        msg.innerHTML = '<span class="ok">가입 성공! 이제 글을 쓸 수 있어요.</span>';
+      } catch (e) {
+        console.error(e);
+        msg.innerHTML = `<span class="err">${esc(e.message || '가입 실패')}</span>`;
+      }
+    };
+
+    // --- 로그인/로그아웃 ---
+    $('#goLogin').onclick = () => show(pageLogin);
+
+    $('#btnLogin').onclick = async () => {
+      const email = $('#li_email').value.trim();
+      const pw    = $('#li_pw').value;
+      const msg   = $('#loginMsg');
+      msg.textContent = '';
+      try {
+        await signInWithEmailAndPassword(auth, email, pw);
+      } catch (e) {
+        console.error(e);
+        msg.innerHTML = `<span class="err">${esc(e.message || '로그인 실패')}</span>`;
+      }
+    };
+
+    btnLogout.onclick = () => signOut(auth);
+
+    // --- 새 글 작성 ---
+    // --- Create Post (Realtime DB, BASE64 이미지) ---
+$('#btnPost').onclick = async () => {
+  const me = auth.currentUser;
+  if (!me) return alert("로그인 필요!");
+
+  const text = $('#po_text').value.trim();
+  const file = $('#po_img').files[0];
+  const pm = $('#postMsg');
+  pm.textContent = '';
+
+  if (!text) return alert("내용을 입력하세요");
+
+  let imageBase64 = "";
+
+  try {
+    // 🔥 이미지 선택된 경우 BASE64 변환
+    if (file) {
+      const reader = new FileReader();
+      imageBase64 = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject("이미지 변환 실패");
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // 작성자 이름 가져오기
+    const userName =
+      me.displayName ||
+      localStorage.getItem("blogName") ||
+      "사용자";
+
+    // 🔥 DB에 저장
+    const postRef = push(ref(db, "posts"));
+    await set(postRef, {
+      id: postRef.key,
+      uid: me.uid,
+      userName,
+      userPhoto: me.photoURL || "",
+      text,
+      imageBase64,
+      ts: Date.now(),
+      likes: {}
+    });
+
+    // 리셋
+    $('#po_text').value = "";
+    $('#po_img').value = "";
+    pm.innerHTML = `<span class="ok">게시 완료!</span>`;
+    setTimeout(() => (pm.textContent = ""), 1500);
+
+  } catch (e) {
+    console.error("🔥 POST ERROR:", e);
+    pm.innerHTML = `<span class="err">${e.message || "업로드 실패"}</span>`;
+  }
+};
+
+    // --- 피드 렌더링 ---
+    let unsubscribe = null;
+
+    function attachFeed() {
+      if (unsubscribe) return;
+      const postsRef = ref(db, 'posts');
+      unsubscribe = onValue(postsRef, (snap) => {
+        const data = snap.val() || {};
+        const list = Object.values(data).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        empty.hidden = list.length > 0;
+
+        feed.innerHTML = list.map(p => `
+          <article class="post" data-id="${p.id}">
+            <div class="meta">
+              🧑 <b>${esc(p.userName || '사용자')}</b>
+              · <span class="hint">${timeAgo(p.ts)}</span>
+            </div>
+            <div>${esc(p.text || '')}</div>
+            ${p.imageBase64 ? `<img src="${p.imageBase64}" alt="post image" />` : ``}
+            <div style="margin-top:8px">
+              <button class="btn btn-like" type="button" data-id="${p.id}">
+                ${isLiked(p) ? '💖' : '❤️'} ${likeCount(p)}
+              </button>
+              <button class="btn btn-del" type="button" data-id="${p.id}">
+                삭제
+              </button>
+            </div>
+          </article>
+        `).join('');
+      });
+    }
+
+    function detachFeed() {
+      if (unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
+      }
+      feed.innerHTML = '';
+      empty.hidden = false;
+    }
+
+    // --- 좋아요/삭제 helper ---
+    const likeCount = p => p.likes ? Object.keys(p.likes).length : 0;
+    const isLiked = p => {
+      const u = auth.currentUser;
+      return !!(u && p.likes && p.likes[u.uid]);
+    };
+
+    function timeAgo(ts) {
+      if (!ts) return '';
+      const diff = Date.now() - ts;
+      const m = 60e3, h = 3600e3, d = 86400e3;
+      if (diff < m)  return '방금 전';
+      if (diff < h)  return Math.floor(diff / m) + '분 전';
+      if (diff < d)  return Math.floor(diff / h) + '시간 전';
+      return Math.floor(diff / d) + '일 전';
+    }
+
+    // --- 좋아요 토글 ---
+    async function toggleLike(id) {
+      const me = auth.currentUser;
+      if (!me) return alert('로그인 필요');
+
+      const likesRef = ref(db, `posts/${id}/likes/${me.uid}`);
+      const snap = await get(likesRef);
+      if (snap.exists()) {
+        await remove(likesRef);      // 이미 눌렀으면 취소
+      } else {
+        await set(likesRef, true);   // 안 눌렀으면 추가
+      }
+    }
+
+    // --- 글 삭제 ---
+    async function delPost(id) {
+      const me = auth.currentUser;
+      if (!me) return alert('로그인 필요');
+
+      const postRef = ref(db, `posts/${id}`);
+      const snap = await get(postRef);
+      if (!snap.exists()) return;
+
+      const post = snap.val();
+      if (post.uid !== me.uid) {
+        return alert('본인 글만 삭제할 수 있어요.');
+      }
+      await remove(postRef);
+    }
+
+    // --- 피드 버튼 이벤트 (위임) ---
+    feed.addEventListener('click', (e) => {
+      const likeBtn = e.target.closest('.btn-like');
+      const delBtn  = e.target.closest('.btn-del');
+      if (likeBtn) toggleLike(likeBtn.dataset.id);
+      if (delBtn)  delPost(delBtn.dataset.id);
+    });
+  </script>
+</body>
+</html>
