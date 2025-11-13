@@ -164,55 +164,35 @@
     });
 
     // --- 회원가입 ---
-    $('#btnSignup').onclick = async () => {
-      const name  = $('#su_name').value.trim();
-      const email = $('#su_email').value.trim();
-      const pw    = $('#su_pw').value;
-      const file  = $('#su_avatar').files[0];
-      const msg   = $('#signupMsg');
-      msg.textContent = '';
+    $('#btnSignup').onclick = async ()=>{
+  const name = $('#su_name').value.trim();
+  const email = $('#su_email').value.trim();
+  const pw = $('#su_pw').value;
+  const msg = $('#signupMsg'); msg.textContent='';
 
-      if (!email || !pw) {
-        msg.innerHTML = '<span class="err">이메일과 비밀번호를 입력하세요.</span>';
-        return;
-      }
+  try{
+    const { user } = await createUserWithEmailAndPassword(auth, email, pw);
 
-      try {
-        const { user } = await createUserWithEmailAndPassword(auth, email, pw);
+    // 프로필 이미지 없이 이름만 저장
+    await updateProfile(user, {
+      displayName: name || '사용자'
+    });
 
-        let photoURL = '';
-        if (file) {
-          const r = sRef(storage, `avatars/${user.uid}/${crypto.randomUUID()}`);
-          await uploadBytes(r, file);
-          photoURL = await getDownloadURL(r);
-        }
+    // DB 저장
+    await set(ref(db, `users/${user.uid}`), {
+      uid: user.uid,
+      name: name || '사용자',
+      email: email,
+      photoURL: "",
+      createdAt: Date.now()
+    });
 
-        const finalName = name || '사용자';
-
-        await updateProfile(user, {
-          displayName: finalName,
-          photoURL: photoURL || null
-        });
-
-        await set(ref(db, `users/${user.uid}`), {
-          uid: user.uid,
-          name: finalName,
-          email,
-          photoURL: photoURL || '',
-          createdAt: Date.now()
-        });
-
-        // 헤더도 즉시 업데이트
-        greet.hidden = false;
-        greet.textContent = `안녕하세요, ${finalName}님!`;
-        btnLogout.hidden = false;
-        show(pageMain);
-        msg.innerHTML = '<span class="ok">가입 성공! 이제 글을 쓸 수 있어요.</span>';
-      } catch (e) {
-        console.error(e);
-        msg.innerHTML = `<span class="err">${esc(e.message || '가입 실패')}</span>`;
-      }
-    };
+    msg.innerHTML = `<span class="ok">가입 성공!</span>`;
+  }
+  catch(e){
+    msg.innerHTML = `<span class="err">${esc(e.message||'가입 실패')}</span>`;
+  }
+};
 
     // --- 로그인/로그아웃 ---
     $('#goLogin').onclick = () => show(pageLogin);
@@ -387,5 +367,6 @@ $('#btnPost').onclick = async () => {
   </script>
 </body>
 </html>
+
 
 
